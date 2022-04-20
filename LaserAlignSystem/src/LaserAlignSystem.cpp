@@ -14,13 +14,23 @@
 void setup();
 void loop();
 void onDataReceived(const uint8_t *data, size_t len, const BlePeerDevice &peer, void *context);
-void ScanBeamHorizontal();
 void ScanSpiral();
+void ScanHorizontal();
+void Scan();
+void getPDval();
+void getSingleVal();
+void goTOsinglePD();
+void goTOpd();
+void cyclePD();
+void printArray();
+void SearchArray();
+void SineScan();
 #line 8 "c:/Users/Arjun/Documents/IOT/IOTCapstone/LaserAlignSystem/src/LaserAlignSystem.ino"
 SYSTEM_MODE(SEMI_AUTOMATIC);
 
 // library
 #include <Stepper.h>
+#include <math.h>
 
 const int stepsPerRevolution = 2048;
 const int RPM = 10;
@@ -38,13 +48,132 @@ BleCharacteristic rxCharacteristic("rx", BleCharacteristicProperty::WRITE_WO_RSP
 BleAdvertisingData data;
 
 const int PHOTODIODE = A0;
-int photodioideReading;
+int photoVal;
+int largestPhotoVal;
+bool largerReadingDetected;
 unsigned int timer;
+bool ScanToggle;
+
+int currentX;
+int currentY;
+int n;
+int pdX[4];
+int pdY[4];
+int pdDirection;
+
+byte valD3;
+byte valD4;
+
+const byte pins[] = {valD3, valD4};
+int signalPins = sizeof(pins);
+int i;
+
+int singleX;
+int singleY;
+
+byte recievedData;
+
+// Lora Vars
+// String password = "BA4204031968BA1114199009021994A7";
+String reply;
+int addr = 999;
+int net = 5;
+byte buf[40];
+int dataLen;
+int dataLora;
+int db;
+int SNR;
+
+String parse0;
+String parse1;
+String parse2;
+String parse3;
+String parse4;
+
+unsigned int sentTime;
+unsigned int secondTime;
+String sentTimeString;
+int sentTimeLenght;
+unsigned int offset;
+
+unsigned int stepperArray[5000][3];
+unsigned int startTimer1;
+unsigned int endTimer1;
+int totalScanTime;
+int stepperCounter;
+
+bool MoveToState;
+
+bool StartTimer;
+unsigned int storedTimer;
 
 void setup() {
 
-    Serial.begin();
-    waitFor(Serial.isConnected, 15000);
+    Serial.begin(9600);
+    delay(3000);
+    Serial.printf("Beginning Commands \n");
+
+    Serial1.begin(115200);
+    Serial1.printf("AT\r\n");
+    delay(200);
+    if (Serial1.available() > 0) {
+        Serial.printf("Awaiting Reply\n");
+        reply = Serial1.readStringUntil('\n');
+        Serial.printf("Reply: %s\n", reply.c_str());
+    }
+
+    // Serial1.printf("AT+CPIN=%s\r\n",password.c_str()); //correct
+    // delay(200);
+    // if(Serial1.available()>0) {
+    //   Serial.printf("Awaiting Reply from password\n");
+    //   reply = Serial1.readStringUntil('\n');
+    //   Serial.printf("Reply: %s\n",reply.c_str());
+    // }
+
+    Serial1.printf("AT+ADDRESS=%i\r\n", addr); // correct
+    delay(200);
+    if (Serial1.available() > 0) {
+        Serial.printf("Awaiting Reply from address\n");
+        reply = Serial1.readStringUntil('\n');
+        Serial.printf("Reply address: %s\n", reply.c_str());
+    }
+
+    Serial1.printf("AT+NETWORKID=%i\r\n", net); // correct
+    delay(200);
+    if (Serial1.available() > 0) {
+        Serial.printf("Awaiting Reply from networkid\n");
+        reply = Serial1.readStringUntil('\n');
+        Serial.printf("Reply network: %s\n", reply.c_str());
+    }
+
+    Serial1.printf("AT+ADDRESS?\r\n"); // correct
+    delay(200);
+    if (Serial1.available() > 0) {
+        Serial.printf("Awaiting Reply\n");
+        reply = Serial1.readStringUntil('\n');
+        Serial.printf("Reply get address: %s\n", reply.c_str());
+    }
+
+    Serial1.printf("AT+NETWORKID?\r\n"); // correct
+    delay(200);
+    if (Serial1.available() > 0) {
+        Serial.printf("Awaiting Reply\n");
+        reply = Serial1.readStringUntil('\n');
+        Serial.printf("Reply get network: %s\n", reply.c_str());
+    }
+
+    Serial1.printf("AT+CPIN?\r\n"); // correct
+    delay(500);
+    if (Serial1.available() > 0) {
+        Serial.printf("Awaiting Reply\n");
+        reply = Serial1.readStringUntil('\n');
+        reply.getBytes(buf, 40);
+        Serial.printf("Reply get password: %s\n", (char *)buf);
+    }
+   
+
+    // pinMode(D2, INPUT);
+    // attachInterrupt(D2, getSingleVal, RISING);
 
     BLE.on();
     BLE.addCharacteristic(txCharacteristic);
@@ -55,10 +184,61 @@ void setup() {
     tipStepper.setSpeed(RPM);
     tiltStepper.setSpeed(RPM);
 
-    pinMode(PHOTODIODE, INPUT);
+    pinMode(PHOTODIODE, INPUT); // delete this later only for quick testing purposes of photodioide pin on TX side
+
+    pinMode(D3, INPUT); // bit 2
+    pinMode(D4, INPUT); // bit 1
+    pinMode(A1, OUTPUT); // reset pd values with a HIGH/LOW SIGNAL to an interrupt ( it will trigger an interrupt on the other side )
+
+    ScanToggle = false;
+    MoveToState= true;
 }
 
 void loop() {
+
+    if (Serial1.available()) {
+        Serial.printf("Awaiting Incoming Message");
+        parse0 = Serial1.readStringUntil(',');
+        parse1 = Serial1.readStringUntil(',');
+        parse2 = Serial1.readStringUntil(',');
+        parse3 = Serial1.readStringUntil(',');
+        parse4 = Serial1.readStringUntil('\n');
+        Serial.printf("Incoming Message; %s\n%s\n%s\n%s\n%s\n", parse0.c_str(), parse1.c_str(), parse2.c_str(), parse3.c_str(), parse4.c_str());
+        dataLen = parse2.toInt();
+        dataLora = parse3.toInt();
+        db = parse4.toInt();
+        //SNR = parse5.toInt();
+        Serial.printf("Incoming Len %i, IncomingData %i\n", dataLen, dataLora);
+          if(dataLora == 0){
+          Serial.printf("Scan did not work\n");
+        }
+        if(dataLora >7){
+            MoveToState= true;
+        }
+
+    }
+
+    // if (StartTimer) {
+    //     sentTime = micros();
+    //     sentTimeString = String(sentTime);
+    //     sentTimeLenght = sentTimeString.length();
+    //     Serial1.printf("AT+SEND=888,%i,%s\r\n", sentTimeLenght, sentTimeString.c_str());
+    //     Serial.printf("Sent");
+    //     StartTimer = false;
+    // }
+
+    if (ScanToggle) {
+        Scan();
+        printArray();
+        // cyclePD(); // serial print photdiode position
+        ScanToggle = false;
+    }
+    if(MoveToState){
+        SearchArray();
+        goTOsinglePD();
+        MoveToState=false;
+    }   
+  
 }
 
 void onDataReceived(const uint8_t *data, size_t len, const BlePeerDevice &peer, void *context) {
@@ -66,41 +246,41 @@ void onDataReceived(const uint8_t *data, size_t len, const BlePeerDevice &peer, 
     uint8_t i;
     static int stepSize;
 
-    Serial.printf("Recieved data from; %02X:%02X:%02X:%02X:%02X:%02X \n", peer.address()[0], peer.address()[1], peer.address()[2], peer.address()[3], peer.address()[4], peer.address()[5]);
-    Serial.printf("Bytes:");
+    // Serial.printf("Recieved data from; %02X:%02X:%02X:%02X:%02X:%02X \n", peer.address()[0], peer.address()[1], peer.address()[2], peer.address()[3], peer.address()[4], peer.address()[5]);
+    // Serial.printf("Bytes:");
 
     for (i = 0; i < len; i++) {
-        Serial.printf("%02X", data[i]);
+        // Serial.printf("%02X", data[i]);
     }
 
     // up arrow recieved
     if (data[0] == 0x21 && data[1] == 0x42 && data[2] == 0x35 && data[3] == 0x31) {
-        Serial.printf("\nUp Arrow");
+        // Serial.printf("\nUp Arrow");
         tipStepper.step(stepSize);
     }
 
     // down arrow recieved
     if (data[0] == 0x21 && data[1] == 0x42 && data[2] == 0x36 && data[3] == 0x31) {
-        Serial.printf("\nDown Arrow");
+        // Serial.printf("\nDown Arrow");
         tipStepper.step(-stepSize);
     }
 
     // right arrow  recieved
     if (data[0] == 0x21 && data[1] == 0x42 && data[2] == 0x38 && data[3] == 0x31) {
-        Serial.printf("\nRight Arrow");
+        // Serial.printf("\nRight Arrow");
         tiltStepper.step(-stepSize);
     }
 
     // left arrow recieved
     if (data[0] == 0x21 && data[1] == 0x42 && data[2] == 0x37 && data[3] == 0x31) {
-        Serial.printf("\nLeft Arrow");
+        // Serial.printf("\nLeft Arrow");
         tiltStepper.step(stepSize);
     }
 
     // button1 recieved
     if (data[0] == 0x21 && data[1] == 0x42 && data[2] == 0x31 && data[3] == 0x31) {
         stepSize++;
-        Serial.printf("stepsize = %i", stepSize);
+        // Serial.printf("stepsize = %i", stepSize);
     }
 
     // button2 recieved
@@ -109,39 +289,25 @@ void onDataReceived(const uint8_t *data, size_t len, const BlePeerDevice &peer, 
         if (stepSize < 1) {
             stepSize = 1;
         }
-        Serial.printf("stepsize = %i", stepSize);
+        StartTimer = true;
+
+        // Serial.printf("stepsize = %i", stepSize);
     }
 
     // button3 recieved
     if (data[0] == 0x21 && data[1] == 0x42 && data[2] == 0x33 && data[3] == 0x31) {
-        Serial.printf("\nbutton3");
-        ScanBeamHorizontal();
+        // Serial.printf("\nbutton3");
+        ScanToggle = true;
     }
 
     // button4 recieved
     if (data[0] == 0x21 && data[1] == 0x42 && data[2] == 0x34 && data[3] == 0x31) {
-        Serial.printf("\nbutton4");
+        // Serial.printf("\nbutton4");
         ScanSpiral();
     }
 
-    Serial.printf("\n");
-    Serial.printf("Message: %s \n", (char *)data);
-}
-
-void ScanBeamHorizontal() {
-    int totalHorizontalSteps = 50; // maintain even step sizes
-    int totalVerticalSteps = 50;
-    int i;
-    int n = 1;
-    tiltStepper.step(totalHorizontalSteps / 2); // move to the left from current position
-    tipStepper.step(totalVerticalSteps / 2);    // move upwards from current position
-    for (i = 0; i < totalVerticalSteps; i++) {
-        n = n * -1;
-        tiltStepper.step(totalHorizontalSteps * n);
-        tipStepper.step(-1);
-    }
-    tiltStepper.step(-totalHorizontalSteps / 2); // move to the right to reset to current position
-    tipStepper.step(totalVerticalSteps / 2);     // move downwards to reset to current position
+    // Serial.printf("\n");
+    // Serial.printf("Message: %s \n", (char *)data);
 }
 
 void ScanSpiral() {
@@ -162,8 +328,212 @@ void ScanSpiral() {
             tipStepper.step(-i);
         }
     }
-       tiltStepper.setSpeed(RPM);
-        tiltStepper.setSpeed(RPM);
-        tiltStepper.step(totalSteps / 2);
-        tipStepper.step(totalSteps / 2);
+    tiltStepper.setSpeed(RPM);
+    tiltStepper.setSpeed(RPM);
+    tiltStepper.step(totalSteps / 2);
+    tipStepper.step(totalSteps / 2);
 }
+
+void ScanHorizontal() {
+    int totalHorizontalSteps = 50; // maintain even step sizes
+    int totalVerticalSteps = 50;
+    int i;
+    int h;
+    int n = 1;
+    int currentX;
+    int currentY;
+
+    tiltStepper.step(totalHorizontalSteps / 2); // move to the left from current position
+    tipStepper.step(totalVerticalSteps / 2);    // move upwards from current position
+    currentX = totalHorizontalSteps / 2;
+    currentY = totalVerticalSteps / 2;
+    Serial.printf("currentX = %i , currentY = %i\n", currentX, currentY);
+    for (i = 0; i < totalVerticalSteps; i++) {
+        n = n * -1;
+        for (h = 0; h < totalHorizontalSteps; h++) {
+            tiltStepper.step(1 * n);
+            currentX = currentX + (1 * n);
+            Serial.printf("current x = %i , currentY = %i\n", currentX, currentY);
+        }
+        tipStepper.step(-1);
+        currentY = currentY - 1;
+    }
+
+    tiltStepper.step(-totalHorizontalSteps / 2); // move to the right to reset to current position
+    tipStepper.step(totalVerticalSteps / 2);     // move downwards to reset to current position
+    currentX = currentX + (-totalHorizontalSteps / 2);
+    currentY = currentY + (totalVerticalSteps / 2);
+    Serial.printf("current x = %i , currentY = %i\n", currentX, currentY);
+}
+
+void Scan() {
+    int totalHorizontalSteps = 50; // maintain even step sizes
+    int totalVerticalSteps = 50;
+
+    unsigned int stepTimer;
+    int horizontalCounter;
+    int verticalCounter;
+    bool ScanComplete;
+    n = 1;
+    horizontalCounter = 0;
+    verticalCounter = 0;
+    currentX = 0;
+    currentY = 0;
+
+    n = n * -1;
+  
+    tiltStepper.step(totalHorizontalSteps / 2); // move to the left from current position
+    tipStepper.step(totalVerticalSteps / 2);    // move upwards from current position
+    digitalWrite(A1, HIGH);                     // trigger an interrupt to clear PD val
+    digitalWrite(A1, LOW);                      // reset pin for next interrupt
+    currentX = totalHorizontalSteps / 2;
+    currentY = totalVerticalSteps / 2;
+    
+    Serial1.printf("AT+SEND=888,1,5\r\n");
+    startTimer1 = micros(); 
+    delayMicroseconds(1065273*1.5);                 // delay time between Tx and Rx
+    Serial.printf("current x = %i , currentY = %i\n", currentX, currentY);
+    ScanComplete = false;
+    // startTimer
+    while (ScanComplete == false) {
+
+        if (micros() - stepTimer > 100) {
+
+            if (horizontalCounter <= totalHorizontalSteps) {
+                stepTimer = micros();
+                storedTimer= stepTimer-startTimer1;
+                tiltStepper.step(1 * n);
+                currentX = currentX + (1 * n);
+                stepperCounter++;
+                stepperArray[stepperCounter][0] = storedTimer;
+                stepperArray[stepperCounter][1] = currentX;
+                stepperArray[stepperCounter][2] = currentY;
+            }
+
+            horizontalCounter++;
+        }
+        if (horizontalCounter == totalHorizontalSteps) {
+            stepTimer = micros();
+            storedTimer= stepTimer-startTimer1;
+            tipStepper.step(-1);
+            currentY = currentY - 1;
+            stepperCounter++;
+            stepperArray[stepperCounter][0] = storedTimer;
+            stepperArray[stepperCounter][1] = currentX;
+            stepperArray[stepperCounter][2] = currentY;
+            horizontalCounter = 0;
+            n = n * -1;
+            verticalCounter++;
+        }
+
+        if (verticalCounter == totalVerticalSteps) {
+            ScanComplete = true;
+        }
+    }
+
+    tiltStepper.step(-totalHorizontalSteps / 2); // move to the right to reset to current position
+    tipStepper.step(totalVerticalSteps / 2);     // move downwards to reset to current position
+    storedTimer= stepTimer-startTimer1;
+    currentX = currentX + (-totalHorizontalSteps / 2);
+    currentY = currentY + (totalVerticalSteps / 2);
+    endTimer1 = micros();
+    stepperCounter++;
+    stepperArray[stepperCounter][0] = storedTimer;
+    stepperArray[stepperCounter][1] = currentX;
+    stepperArray[stepperCounter][2] = currentY;
+    Serial1.printf("AT+SEND=888,1,9\r\n");
+    // Serial.printf("current x = %i , currentY = %i\n", currentX, currentY);
+}
+
+void getPDval() {
+    valD4 = digitalRead(D4);
+    valD3 = digitalRead(D3);
+    i = valD4 << 1 | valD3;
+    pdX[i] = currentX;
+    pdY[i] = currentY;
+    // Serial.printf("interrupted %i \n",i);
+    //  pdDirection = n;
+}
+
+void getSingleVal() {
+    singleX = currentX;
+    singleY = currentY;
+    Serial.printf("singleX %i, singleY %i\n", singleX, singleY);
+    // pdDirection = n;
+}
+
+
+void goTOsinglePD() {
+    tiltStepper.step(singleX);
+    tipStepper.step(singleY);
+    Serial.printf("moved to %i, %i\n", singleX, singleY);
+}
+
+
+void goTOpd() {
+    int x;
+    int tipAverage;
+    int tiltAverage;
+
+    tiltAverage = (pdX[0] + pdX[3]) / 2;
+    tipAverage = (pdY[1] + pdY[2]) / 2;
+
+    tiltStepper.step(pdX[3]);
+    tipStepper.step(pdY[3]);
+    Serial.printf("tiltAverage %i, tipAverage = %i\n", tiltAverage, tipAverage);
+
+    // tiltStepper.step((-1*pdDirection));
+}
+
+void cyclePD() {
+    int c;
+    for (c = 0; c < 4; c++) {
+        Serial.printf("pdX[%i]= %i, pdY[%i] =%i\n", c, pdX[c], c, pdY[c]);
+    }
+}
+
+void printArray() {
+int r; 
+    Serial.printf("printStart\n");
+    
+    for (r = 0; r < stepperCounter; r++) {
+    Serial.printf("%i,%i,%i,%i\n", r,stepperArray[r][0], stepperArray[r][1], stepperArray[r][2]);
+    }
+    
+}
+
+void SearchArray(){
+int x; 
+int row;
+int offset;
+int comparedVal;
+int prevOffset = 7330673;
+
+
+for(x = 0; x < 5000; x++){
+
+    comparedVal = stepperArray[x][0];
+    offset = dataLora - comparedVal;
+    if (abs(offset) < prevOffset){
+        prevOffset = offset;
+        row = x;
+        Serial.printf("offset %i  row = %i\n ", offset, x);
+    }
+ } 
+ singleX = stepperArray[row][1];
+ singleY = stepperArray[row][2];
+ stepperCounter=0;
+ Serial.printf("singleX= %i, singleY=%i\n", singleX, singleY);
+}
+
+void SineScan(){
+ int amp;
+ int freq;
+ int x;
+ int y;
+
+ y = sin(x/freq)*amp + 0;
+
+ // logic while 
+}
+
