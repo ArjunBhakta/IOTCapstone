@@ -179,7 +179,7 @@ void loop() {
         //db = parse3.toInt();
         //SNR = parse4.toInt();
         if(dataLora == 0){
-          Serial.printf("Scan did not work\n");
+          //Serial.printf("Scan finished\n");
         }
         if(dataLora == 5){
           startTimer2 = micros();
@@ -209,7 +209,7 @@ void loop() {
         // timer = millis();
         // }
 
-        if (photoVal > largestPhotoVal) {
+        if (photoVal > largestPhotoVal ) {
             largestPhotoVal = photoVal;
             largerReadingDetected = true;
         }
@@ -218,7 +218,7 @@ void loop() {
             // Serial.printf("%i\n", largestPhotoVal);
             recievedTime = micros()- startTimer2;
             largerReadingDetected = false;
-            Serial.printf("NewVal %i\n", recievedTime);
+            Serial.printf("NewVal %i, photoval %i\n", recievedTime, photoVal);
         }
 
 

@@ -82,12 +82,15 @@ int totalScanTime;
 int stepperCounter;
 
 bool MoveToState;
+bool button4State;
 
 bool StartTimer;
 unsigned int storedTimer;
 
-void setup() {
+int Spiral(String extra);
 
+void setup() {
+    //Particle.function("spiral",Spiral);
     Serial.begin(9600);
     delay(3000);
     Serial.printf("Beginning Commands \n");
@@ -170,7 +173,8 @@ void setup() {
     pinMode(A1, OUTPUT); // reset pd values with a HIGH/LOW SIGNAL to an interrupt ( it will trigger an interrupt on the other side )
 
     ScanToggle = false;
-    MoveToState= true;
+    MoveToState= false;
+    button4State= false;
 }
 
 void loop() {
@@ -196,6 +200,7 @@ void loop() {
         }
 
     }
+    //ParabolaScan();
 
     // if (StartTimer) {
     //     sentTime = micros();
@@ -217,6 +222,14 @@ void loop() {
         goTOsinglePD();
         MoveToState=false;
     }   
+    if (button4State){
+        //SpiralScan();
+        ParabolaScan();
+        ParabolaScan();
+        ParabolaScan();
+        button4State= false;
+    }
+    
   
 }
 
@@ -277,12 +290,14 @@ void onDataReceived(const uint8_t *data, size_t len, const BlePeerDevice &peer, 
     if (data[0] == 0x21 && data[1] == 0x42 && data[2] == 0x33 && data[3] == 0x31) {
         // Serial.printf("\nbutton3");
         ScanToggle = true;
+        stepperCounter = 0;
     }
 
     // button4 recieved
     if (data[0] == 0x21 && data[1] == 0x42 && data[2] == 0x34 && data[3] == 0x31) {
         // Serial.printf("\nbutton4");
-        ScanSpiral();
+        
+        button4State = true;
     }
 
     // Serial.printf("\n");
@@ -358,7 +373,7 @@ void Scan() {
     verticalCounter = 0;
     currentX = 0;
     currentY = 0;
-
+    stepperCounter= 0;
     n = n * -1;
   
     tiltStepper.step(totalHorizontalSteps / 2); // move to the left from current position
@@ -369,14 +384,15 @@ void Scan() {
     currentY = totalVerticalSteps / 2;
     
     Serial1.printf("AT+SEND=888,1,5\r\n");
-    startTimer1 = micros(); 
-    delayMicroseconds(1065273*1.5);                 // delay time between Tx and Rx
-    Serial.printf("current x = %i , currentY = %i\n", currentX, currentY);
+     
+    delayMicroseconds(1065273 *.827); 
+    startTimer1 = micros();                // delay time between Tx and Rx
+    //Serial.printf("current x = %i , currentY = %i\n", currentX, currentY);
     ScanComplete = false;
     // startTimer
     while (ScanComplete == false) {
 
-        if (micros() - stepTimer > 100) {
+        if (micros() - stepTimer > 1000) {
 
             if (horizontalCounter <= totalHorizontalSteps) {
                 stepTimer = micros();
@@ -415,12 +431,21 @@ void Scan() {
     storedTimer= stepTimer-startTimer1;
     currentX = currentX + (-totalHorizontalSteps / 2);
     currentY = currentY + (totalVerticalSteps / 2);
+    
+    Serial.printf(" movedStepper");
     endTimer1 = micros();
     stepperCounter++;
     stepperArray[stepperCounter][0] = storedTimer;
     stepperArray[stepperCounter][1] = currentX;
     stepperArray[stepperCounter][2] = currentY;
+
     Serial1.printf("AT+SEND=888,1,9\r\n");
+    Serial.printf(" sending 9");
+    delay(200);
+    if( Serial1.available()>0){
+        reply = Serial1.readStringUntil('\n');
+        Serial.printf("\n Reply to send : %s\n", reply.c_str());
+    }
     // Serial.printf("current x = %i , currentY = %i\n", currentX, currentY);
 }
 
@@ -496,7 +521,7 @@ for(x = 0; x < 5000; x++){
     if (abs(offset) < prevOffset){
         prevOffset = offset;
         row = x;
-        Serial.printf("offset %i  row = %i\n ", offset, x);
+       // Serial.printf("offset %i  row = %i\n ", offset, x);
     }
  } 
  singleX = stepperArray[row][1];
@@ -505,17 +530,78 @@ for(x = 0; x < 5000; x++){
  Serial.printf("singleX= %i, singleY=%i\n", singleX, singleY);
 }
 
-void SineScan(){
-int amp;
-int freq;
-int x;
-int y;
+void ParabolaScan(){
+int amp =100;
+static int x1;
+static int y1;
+static int x2;
+static int y2;
 
-Amp = 10
+int p = 200 ;
 
- y = cos(x/freq)*amp + 0;
- 
+for (x1=0;x1<=50; x1++){
+    y1= (x1*x1)/p;
+    Serial.printf ("x = %i, y= %i \n",x1, y1);
+    Serial.printf ("x2 = %i, y2= %i \n",x2, y2);
+    tiltStepper.step(x2-x1); // move to the right to reset to current position
+    tipStepper.step(y2-y1);  // move downwards to reset to current position
+    x2= x1;
+    y2=y1;
+    
+}
+x1=0;
+x2=0;
+y1 =0;
+y2=0;
+
+for(x1=0; x1<=50;x1++){
+    y1= (x1*x1)/p;
+    Serial.printf ("x = %i, y= %i \n",x1, y1);
+    Serial.printf ("x2 = %i, y2= %i \n",x2, y2);
+    tiltStepper.step(x1-x2); // move to the right to reset to current position
+    tipStepper.step(y1-y2);  // move downwards to reset to current position
+    x2= x1;
+    y2=y1;
+   
+}
+x1=0;
+x2=0;
+y1=0;
+y2= 0;
+
+
+for(x1=0; x1>=-50;x1--){
+    y1= (x1*x1)/p;
+    Serial.printf ("x = %i, y= %i \n",x1, y1);
+    Serial.printf ("x2 = %i, y2= %i \n",x2, y2);
+    tiltStepper.step(x2-x1); // move to the right to reset to current position
+    tipStepper.step(y2-y1);  // move downwards to reset to current position
+    x2= x1;
+    y2=y1;
+  
+}
+x1=0;
+x2=0;
+y1 =0;
+y2=0;
+for(x1=0; x1>=-50;x1--){
+    y1= (x1*x1)/p;
+    Serial.printf ("x = %i, y= %i \n",x1, y1);
+    Serial.printf ("x2 = %i, y2= %i \n",x2, y2);
+    tiltStepper.step(x1-x2); // move to the right to reset to current position
+    tipStepper.step(y1-y2);  // move downwards to reset to current position
+    x2= x1;
+    y2=y1;
+
 }
 
+
+x1=0;
+x2=0;
+y1=0;
+y2=0;
+
+
+}
 
 
